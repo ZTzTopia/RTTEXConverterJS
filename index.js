@@ -17,6 +17,7 @@ class RTFileHeader {
         this.version = buffer.readInt8(pos);
         pos += 1;
 
+        // reverse : uint8_t
         pos += 1;
         return pos;
     }
@@ -124,18 +125,25 @@ class RTTEX {
         }
     }
 
-    toRawData(vertical = true) {
+    toRawData(flipVertical = true) {
         if (this.mipDatas.length == 0) {
             return null;
         }
 
-        if (vertical) {
+        if (flipVertical) {
             for (let i = 0; i < this.mipHeaders[0].height / 2; i++) {
                 for (let j = 0; j < this.mipHeaders[0].width; j++) {
-                    let temp = this.mipDatas[0][i * this.mipHeaders[0].width + j];
-                    this.mipDatas[0][i * this.mipHeaders[0].width + j] = 
-                        this.mipDatas[0][(this.mipHeaders[0].height - i - 1) * this.mipHeaders[0].width + j];
-                    this.mipDatas[0][(this.mipHeaders[0].height - i - 1) * this.mipHeaders[0].width + j] = temp;
+                    for (let k = 0; k < (this.rttexHeader.usesAlpha ? 4 : 3); k++) {
+                        let a = this.mipDatas[0][(i * this.mipHeaders[0].width + j) 
+                            * (this.rttexHeader.usesAlpha ? 4 : 3) + k];
+                        let b = this.mipDatas[0][((this.mipHeaders[0].height - i - 1) 
+                            * this.mipHeaders[0].width + j) * (this.rttexHeader.usesAlpha ? 4 : 3) + k];
+
+                        this.mipDatas[0][(i * this.mipHeaders[0].width + j)
+                            * (this.rttexHeader.usesAlpha ? 4 : 3) + k] = b;
+                        this.mipDatas[0][((this.mipHeaders[0].height - i - 1)
+                            * this.mipHeaders[0].width + j) * (this.rttexHeader.usesAlpha ? 4 : 3) + k] = a;
+                    }
                 }
             }
         }
@@ -143,28 +151,32 @@ class RTTEX {
         return this.mipDatas[0];
     }
 
-    toImage(vertical = true) {
+    toImage(flipVertical = true) {
         if (this.mipDatas.length == 0) {
             return false;
         }
 
-        const jimp_ = new jimp(this.mipHeaders[0].width, this.mipHeaders[0].height, (err, image) => {
+        new jimp(this.mipHeaders[0].width, this.mipHeaders[0].height, (err, image) => {
+            if (err) throw err;
+
+            let rawData = this.toRawData(!flipVertical);
+
             for (let i = 0; i < this.mipHeaders[0].width * this.mipHeaders[0].height; i++) {
                 let x = i % this.mipHeaders[0].width;
                 let y = Math.floor(i / this.mipHeaders[0].width);
                 let index = (x + y * this.rttexHeader.originalWidth) * (this.rttexHeader.usesAlpha ? 4 : 3);
 
                 image.setPixelColor(jimp.rgbaToInt(
-                        this.mipDatas[0][index + 0],
-                        this.mipDatas[0][index + 1],
-                        this.mipDatas[0][index + 2],
-                        this.rttexHeader.usesAlpha ? this.mipDatas[0][index + 3] : 255), 
-                    i % this.mipHeaders[0].width, Math.floor(i / this.mipHeaders[0].width));
+                    rawData[index + 0],
+                    rawData[index + 1],
+                    rawData[index + 2],
+                    this.rttexHeader.usesAlpha ? rawData[index + 3] : 255), x, y);
             }
-            
-            image.flip(false, vertical);
+
+            image.flip(false, flipVertical);
             image.write("output.png");
         });
+        
         return true;
     }
 }
