@@ -1,6 +1,7 @@
 const fs = require("fs");
 const path = require("path");
 const jimp = require("jimp");
+const { throws } = require("assert");
 
 class RTFileHeader {
     constructor() {
@@ -118,7 +119,7 @@ class RTTEX {
             let mipData = buffer.subarray(pos, pos + mipHeader.dataSize);
             this.mipDatas.push(mipData);
 
-            // TODO: Handle mipmap data
+            // TODO: Handle mipmap data.
             break;
         }
     }
@@ -148,24 +149,28 @@ class RTTEX {
         }
 
         const jimp_ = new jimp(this.mipHeaders[0].width, this.mipHeaders[0].height, (err, image) => {
-            let buffer = image.bitmap.data
-            for (let i = 0; i < this.mipHeaders[0].dataSize; i++) {
-                buffer[i + 0] = this.mipDatas[0][i + 0];
-                buffer[i + 1] = this.mipDatas[0][i + 1];
-                buffer[i + 2] = this.mipDatas[0][i + 2];
-                buffer[i + 3] = this.mipDatas[0][i + 3];
+            for (let i = 0; i < this.mipHeaders[0].width * this.mipHeaders[0].height; i++) {
+                let x = i % this.mipHeaders[0].width;
+                let y = Math.floor(i / this.mipHeaders[0].width);
+                let index = (x + y * this.rttexHeader.originalWidth) * (this.rttexHeader.usesAlpha ? 4 : 3);
+
+                image.setPixelColor(jimp.rgbaToInt(
+                        this.mipDatas[0][index + 0],
+                        this.mipDatas[0][index + 1],
+                        this.mipDatas[0][index + 2],
+                        this.rttexHeader.usesAlpha ? this.mipDatas[0][index + 3] : 255), 
+                    i % this.mipHeaders[0].width, Math.floor(i / this.mipHeaders[0].width));
             }
-        
+            
             image.flip(false, vertical);
             image.write("output.png");
         });
-
         return true;
     }
 }
 
 function main() {
-    let data = fs.readFileSync(path.join(__dirname, "output.rttex"), "binary");
+    let data = fs.readFileSync(path.join(__dirname, "input.rttex"), "binary");
     let buffer = Buffer.from(data, "binary");
 
     let rttex = new RTTEX(buffer);
