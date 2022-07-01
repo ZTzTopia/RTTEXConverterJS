@@ -134,15 +134,10 @@ class RTTEX {
             for (let i = 0; i < this.mipHeaders[0].height / 2; i++) {
                 for (let j = 0; j < this.mipHeaders[0].width; j++) {
                     for (let k = 0; k < (this.rttexHeader.usesAlpha ? 4 : 3); k++) {
-                        let a = this.mipDatas[0][(i * this.mipHeaders[0].width + j) 
-                            * (this.rttexHeader.usesAlpha ? 4 : 3) + k];
-                        let b = this.mipDatas[0][((this.mipHeaders[0].height - i - 1) 
-                            * this.mipHeaders[0].width + j) * (this.rttexHeader.usesAlpha ? 4 : 3) + k];
-
-                        this.mipDatas[0][(i * this.mipHeaders[0].width + j)
-                            * (this.rttexHeader.usesAlpha ? 4 : 3) + k] = b;
-                        this.mipDatas[0][((this.mipHeaders[0].height - i - 1)
-                            * this.mipHeaders[0].width + j) * (this.rttexHeader.usesAlpha ? 4 : 3) + k] = a;
+                        //let a = this.mipDatas[0][(i * this.mipHeaders[0].width + j) * (this.rttexHeader.usesAlpha ? 4 : 3) + k];
+                        //let b = this.mipDatas[0][((this.mipHeaders[0].height - i - 1) * this.mipHeaders[0].width + j) * (this.rttexHeader.usesAlpha ? 4 : 3) + k];
+                        this.mipDatas[0][(i * this.mipHeaders[0].width + j) * (this.rttexHeader.usesAlpha ? 4 : 3) + k] = this.mipDatas[0][((this.mipHeaders[0].height - i - 1) * this.mipHeaders[0].width + j) * (this.rttexHeader.usesAlpha ? 4 : 3) + k];
+                        this.mipDatas[0][((this.mipHeaders[0].height - i - 1) * this.mipHeaders[0].width + j) * (this.rttexHeader.usesAlpha ? 4 : 3) + k] = this.mipDatas[0][(i * this.mipHeaders[0].width + j) * (this.rttexHeader.usesAlpha ? 4 : 3) + k];
                     }
                 }
             }
