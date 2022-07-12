@@ -1,3 +1,7 @@
 /node_modules
-input.rttex
 output.png
+
+/cache
+/game
+/interface
+/extracted

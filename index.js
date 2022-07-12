@@ -1,7 +1,8 @@
-const fs = require("fs");
-const path = require("path");
+const fs = require("node:fs");
 const jimp = require("jimp");
-const { throws } = require("assert");
+const readline = require('node:readline');
+const path = require("node:path");
+const zlib = require("node:zlib");
 
 class RTFileHeader {
     constructor() {
@@ -19,6 +20,34 @@ class RTFileHeader {
 
         // reverse : uint8_t
         pos += 1;
+        return pos;
+    }
+}
+
+class RTPackHeader {
+    constructor() {
+        this.rtFileHeader;
+        this.compressedSize;
+        this.decompressedSize;
+        this.compressionType;
+        this.reversed;
+    }
+
+    serialize(buffer, pos = 0) {
+        this.rtFileHeader = new RTFileHeader();
+        pos = this.rtFileHeader.serialize(buffer, pos);
+
+        this.compressedSize = buffer.readInt32LE(pos);
+        pos += 4;
+
+        this.decompressedSize = buffer.readInt32LE(pos);
+        pos += 4;
+
+        this.compressionType = buffer.readInt8(pos);
+        pos += 1;
+
+        // reverse : uint8_t[15]
+        pos += 15;
         return pos;
     }
 }
@@ -105,92 +134,86 @@ class RTTEXMipHeader {
 
 class RTTEX {
     constructor(buffer, pos = 0) {
-        this.rttexHeader;
-        this.mipHeaders = [];
-        this.mipDatas = [];
-        
         this.rttexHeader = new RTTEXHeader();
-        pos = this.rttexHeader.serialize(buffer, pos);
-        
-        for (let i = 0; i < this.rttexHeader.mipmapCount; i++) {
-            let mipHeader = new RTTEXMipHeader();
-            pos = mipHeader.serialize(buffer, pos);
-            this.mipHeaders.push(mipHeader);
+        this.rtpackHeader = new RTPackHeader();
+        this.buffer = buffer;
 
-            let mipData = buffer.subarray(pos, pos + mipHeader.dataSize);
-            this.mipDatas.push(mipData);
-
-            // TODO: Handle mipmap data.
-            break;
+        if (this.buffer.subarray(pos, 6).toString() == "RTPACK") {
+            let temp_pos = this.rtpackHeader.serialize(this.buffer, pos);
+            this.buffer = zlib.inflateSync(this.buffer.subarray(temp_pos, this.buffer.length));
         }
+
+        this.pos = this.rttexHeader.serialize(this.buffer, pos);
     }
 
-    toRawData(flipVertical = true) {
-        if (this.mipDatas.length == 0) {
+    async rawData(flipVertical = false) {
+        if (this.rttexHeader.format != 5121) {
             return null;
         }
 
-        if (flipVertical) {
-            for (let i = 0; i < this.mipHeaders[0].height / 2; i++) {
-                for (let j = 0; j < this.mipHeaders[0].width; j++) {
-                    for (let k = 0; k < (this.rttexHeader.usesAlpha ? 4 : 3); k++) {
-                        let a = this.mipDatas[0][(i * this.mipHeaders[0].width + j) 
-                            * (this.rttexHeader.usesAlpha ? 4 : 3) + k];
-                        let b = this.mipDatas[0][((this.mipHeaders[0].height - i - 1) 
-                            * this.mipHeaders[0].width + j) * (this.rttexHeader.usesAlpha ? 4 : 3) + k];
+        let posBefore = this.pos;
+        for (let i = 0; i < this.rttexHeader.mipmapCount; i++) {
+            let mipHeader = new RTTEXMipHeader();
+            this.pos = mipHeader.serialize(this.buffer, this.pos);
+            let mipData = this.buffer.subarray(this.pos, this.pos + mipHeader.dataSize);
 
-                        this.mipDatas[0][(i * this.mipHeaders[0].width + j)
-                            * (this.rttexHeader.usesAlpha ? 4 : 3) + k] = b;
-                        this.mipDatas[0][((this.mipHeaders[0].height - i - 1)
-                            * this.mipHeaders[0].width + j) * (this.rttexHeader.usesAlpha ? 4 : 3) + k] = a;
-                    }
-                }
+            this.pos = posBefore;
+            
+            if (flipVertical) {
+                return new Promise(resolve => {
+                    new jimp(mipHeader.width, mipHeader.height, (err, image) => {
+                        if (err) throw err;
+                        
+                        image.bitmap.data.set(mipData);
+                        image.flip(false, true);
+                        resolve(image.bitmap.data);
+                    });
+                });
             }
+        
+            return mipData;
         }
 
-        return this.mipDatas[0];
+        return null;
     }
 
-    toImage(flipVertical = true) {
-        if (this.mipDatas.length == 0) {
-            return false;
-        }
+    async write(path, flipVertical = true) {
+        return new Promise(async (resolve) => {
+            new jimp(this.rttexHeader.width, this.rttexHeader.height, async (err, image) => {
+                if (err) {
+                    // throw err;
+                    resolve(false);
+                }
 
-        new jimp(this.mipHeaders[0].width, this.mipHeaders[0].height, (err, image) => {
-            if (err) throw err;
-
-            let rawData = this.toRawData(!flipVertical);
-
-            for (let i = 0; i < this.mipHeaders[0].width * this.mipHeaders[0].height; i++) {
-                let x = i % this.mipHeaders[0].width;
-                let y = Math.floor(i / this.mipHeaders[0].width);
-                let index = (x + y * this.rttexHeader.originalWidth) * (this.rttexHeader.usesAlpha ? 4 : 3);
-
-                image.setPixelColor(jimp.rgbaToInt(
-                    rawData[index + 0],
-                    rawData[index + 1],
-                    rawData[index + 2],
-                    this.rttexHeader.usesAlpha ? rawData[index + 3] : 255), x, y);
-            }
-
-            image.flip(false, flipVertical);
-            image.write("output.png");
+                let ret = await this.rawData();
+                image.bitmap.data.set(ret);
+                image.flip(false, flipVertical);
+                image.write(path);
+                resolve(true);
+            });
         });
-        
-        return true;
     }
 }
 
-function main() {
-    let data = fs.readFileSync(path.join(__dirname, "input.rttex"), "binary");
-    let buffer = Buffer.from(data, "binary");
+async function main() {
+    const rl = readline.createInterface({
+        input: process.stdin,
+        output: process.stdout
+    });
 
-    let rttex = new RTTEX(buffer);
-    if (!rttex.toImage()) {
-        console.log("Failed to convert RTTEX to image.");
-    }
-
-    console.log("Done.");
+    rl.question("Enter file path: ", async (answer) => {
+        let data = fs.readFileSync(path.join(__dirname, answer), "binary");
+        let buffer = Buffer.from(data, "binary");
+    
+        let rttex = new RTTEX(buffer);
+        let ret = await rttex.write("./output.png");
+    
+        if (!ret) {
+            console.log("Failed to convert RTTEX to image.");
+        }
+    
+        console.log("Done."); 
+    });
 }
 
 main();
