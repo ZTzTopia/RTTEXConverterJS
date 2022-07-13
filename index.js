@@ -147,34 +147,37 @@ class RTTEX {
     }
 
     async rawData(flipVertical = false) {
-        if (this.rttexHeader.format != 5121) {
-            return null;
-        }
+        return new Promise(resolve => {
+            if (this.rttexHeader.format != 5121) {
+                resolve(null);
+            }
 
-        let posBefore = this.pos;
-        for (let i = 0; i < this.rttexHeader.mipmapCount; i++) {
-            let mipHeader = new RTTEXMipHeader();
-            this.pos = mipHeader.serialize(this.buffer, this.pos);
-            let mipData = this.buffer.subarray(this.pos, this.pos + mipHeader.dataSize);
+            let posBefore = this.pos;
+            for (let i = 0; i < this.rttexHeader.mipmapCount; i++) {
+                let mipHeader = new RTTEXMipHeader();
+                this.pos = mipHeader.serialize(this.buffer, this.pos);
+                let mipData = this.buffer.subarray(this.pos, this.pos + mipHeader.dataSize);
 
-            this.pos = posBefore;
-            
-            if (flipVertical) {
-                return new Promise(resolve => {
+                this.pos = posBefore;
+                
+                if (flipVertical) {
                     new jimp(mipHeader.width, mipHeader.height, (err, image) => {
-                        if (err) throw err;
+                        if (err) {
+                            // throw err;
+                            resolve(null);
+                        }
                         
                         image.bitmap.data.set(mipData);
                         image.flip(false, true);
                         resolve(image.bitmap.data);
                     });
-                });
+                }
+            
+                resolve(mipData);
             }
-        
-            return mipData;
-        }
 
-        return null;
+            resolve(null); 
+        });
     }
 
     async write(path, flipVertical = true) {
@@ -188,8 +191,14 @@ class RTTEX {
                 let ret = await this.rawData();
                 image.bitmap.data.set(ret);
                 image.flip(false, flipVertical);
-                image.write(path);
-                resolve(true);
+                image.write(path, (err) => {
+                    if (err) {
+                        // throw err;
+                        resolve(false);
+                    }
+
+                    resolve(true);
+                });
             });
         });
     }
