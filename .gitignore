@@ -1,5 +1,9 @@
 /node_modules
+
+input.png
 output.png
+input.rttex
+output.rttex
 
 /cache
 /game

@@ -200,7 +200,9 @@ class RTFileToImage {
 
         if (this.buffer.subarray(pos, C_RTFILE_PACKAGE_HEADER_BYTE_SIZE).toString() == C_RTFILE_PACKAGE_HEADER) {
             const tempPos = this.rtpackHeader.deserialize(this.buffer, pos);
-            if (this.rtpackHeader.compressionType == eCompressionType_C_COMPRESSION_ZLIB) {
+            if (this.rtpackHeader.compressionType == eCompressionType_C_COMPRESSION_NONE) {
+                this.buffer = this.buffer.subarray(tempPos, this.buffer.length);
+            } else if (this.rtpackHeader.compressionType == eCompressionType_C_COMPRESSION_ZLIB) {
                 this.buffer = zlib.inflateSync(this.buffer.subarray(tempPos, this.buffer.length));
             }
         }
@@ -266,10 +268,22 @@ class ImageToRTFile {
     }
 
     async wwkwkwkk() {
+        const getLowestPowerOf2 = (n) => {
+            let lowest = 1;
+            while (lowest < n) {
+                lowest <<= 1;
+            }
+            
+            return lowest;
+        }
+
+        const image = await sharp(this.path);
+        const metadata = await image.metadata();
+
         const { data, info } = await sharp(this.path)
             .flip(true)
-            .flatten({ background: "#ffffff" })
             .ensureAlpha()
+            .extend({ top: getLowestPowerOf2(metadata.height) - metadata.height, bottom: 0, left: 0, right: getLowestPowerOf2(metadata.width) - metadata.width, background: { r: 0, g: 0, b: 0, alpha: 0 }})
             .raw()
             .toBuffer({ resolveWithObject: true });
         const bitmap = {
@@ -289,10 +303,19 @@ class ImageToRTFile {
             rtFileHeader.version = C_RTFILE_PACKAGE_LATEST_VERSION;
             rtFileHeader.reversed = 0;
 
+            const getLowestPowerOf2 = (n) => {
+                let lowest = 1;
+                while (lowest < n) {
+                    lowest <<= 1;
+                }
+                
+                return lowest;
+            }
+
             const rttexHeader = new RTTEXHeader();
             rttexHeader.rtFileHeader = rtFileHeader;
-            rttexHeader.height = this.bitmap.height;
-            rttexHeader.width = this.bitmap.width;
+            rttexHeader.height = getLowestPowerOf2(this.bitmap.height);
+            rttexHeader.width = getLowestPowerOf2(this.bitmap.width);
             rttexHeader.format = 5121;
             rttexHeader.originalHeight = this.bitmap.height;
             rttexHeader.originalWidth = this.bitmap.width;
@@ -303,8 +326,8 @@ class ImageToRTFile {
             rttexHeader.reversed = 1;
 
             const rttexMipHeader = new RTTEXMipHeader();
-            rttexMipHeader.height = this.bitmap.height;
-            rttexMipHeader.width = this.bitmap.width;
+            rttexMipHeader.height = getLowestPowerOf2(this.bitmap.height);
+            rttexMipHeader.width = getLowestPowerOf2(this.bitmap.width);
             rttexMipHeader.dataSize = this.bitmap.data.length;
             rttexMipHeader.mipLevel = 0;
             rttexMipHeader.reversed = 0;
@@ -318,17 +341,13 @@ class ImageToRTFile {
             const concat2 = Buffer.concat([concat1, this.bitmap.data]);
             const deflated = await zlib.deflateSync(concat2);
 
-            console.log(deflated.length);
-            console.log(concat2.length);
-
             const rtPackHeader = new RTPackHeader();
             rtPackHeader.rtFileHeader = rtFileHeader_;
             rtPackHeader.compressedSize = deflated.length;
             rtPackHeader.decompressedSize = concat2.length;
-            rtPackHeader.type = eCompressionType_C_COMPRESSION_ZLIB;
+            rtPackHeader.compressionType = eCompressionType_C_COMPRESSION_ZLIB;
 
-            fs.writeFileSync(path, rtPackHeader.serialize());
-            fs.appendFileSync(path, deflated);
+            fs.writeFileSync(path, Buffer.concat([rtPackHeader.serialize(), deflated]));
 
             resolve(true);
         });
