@@ -75,9 +75,9 @@ class RTPackHeader {
         let pos = buffer.writeInt32LE(this.compressedSize);
         pos = buffer.writeInt32LE(this.decompressedSize, pos);
         pos = buffer.writeInt8(this.compressionType, pos);
-        pos = buffer.write("ztz", pos);
-        buffer.write("\0".repeat(13), pos);
-        return Buffer.concat([this.rtFileHeader.serialize(), buffer]);
+        pos = buffer.write("_".repeat(12), pos);
+        buffer.write("ztz", pos);
+        return Buffer.concat([ this.rtFileHeader.serialize(), buffer ]);
     }
 }
 
@@ -136,7 +136,7 @@ class RTTEXHeader {
     }
 
     serialize() {
-        const buffer = Buffer.alloc(28 + 64);
+        const buffer = Buffer.alloc(92);
         let pos = buffer.writeInt32LE(this.height);
         pos = buffer.writeInt32LE(this.width, pos);
         pos = buffer.writeInt32LE(this.format, pos);
@@ -146,10 +146,9 @@ class RTTEXHeader {
         pos = buffer.writeInt8(this.aleardyCompressed, pos);
         pos = buffer.writeInt16LE(this.reversedFlags, pos);
         pos = buffer.writeInt32LE(this.mipmapCount, pos);
-        pos = buffer.write("ztz", pos);
-        buffer.write("\0".repeat(61), pos);
-
-        return Buffer.concat([this.rtFileHeader.serialize(), buffer]);
+        pos = buffer.write("_".repeat(61), pos);
+        buffer.write("ztz", pos);
+        return Buffer.concat([ this.rtFileHeader.serialize(), buffer ]);
     }
 }
 
@@ -186,8 +185,8 @@ class RTTEXMipHeader {
         pos = buffer.writeInt32LE(this.width, pos);
         pos = buffer.writeInt32LE(this.dataSize, pos);
         pos = buffer.writeInt32LE(this.mipLevel, pos);
-        pos = buffer.write("ztz", pos);
-        buffer.write("\0".repeat(5), pos);
+        pos = buffer.write("_".repeat(5), pos);
+        buffer.write("ztz", pos);
         return buffer;
     }
 }
@@ -272,11 +271,19 @@ class RTFileToImage {
 
 class ImageToRTFile {
     constructor(path) {
-        this.bitmap = {};
-        this.path = path;
+        this.buffer = fs.readFileSync(path);
     }
 
-    async wwkwkwkk() {
+    async getImageSize() {
+        let image = await sharp(this.buffer);
+        let metadata = await image.metadata();
+        return { 
+            width: metadata.width, 
+            height: metadata.height 
+        };
+    }
+
+    async getImageLowestOf2Size() {
         const getLowestPowerOf2 = (n) => {
             let lowest = 1;
             while (lowest < n) {
@@ -286,13 +293,32 @@ class ImageToRTFile {
             return lowest;
         }
 
-        const image = await sharp(this.path);
-        const metadata = await image.metadata();
+        const { width, height } = await this.getImageSize();
+        return { 
+            width: getLowestPowerOf2(width), 
+            height: getLowestPowerOf2(height)
+        };
+    }
 
-        const { data, info } = await sharp(this.path)
+    async rawData() {
+        const imageSize = await this.getImageSize();
+        const imageLowestOf2Size = await this.getImageLowestOf2Size();
+
+        const { data, info } = await sharp(this.buffer)
             .flip(true)
             .ensureAlpha()
-            .extend({ top: getLowestPowerOf2(metadata.height) - metadata.height, bottom: 0, left: 0, right: getLowestPowerOf2(metadata.width) - metadata.width, background: { r: 0, g: 0, b: 0, alpha: 0 }})
+            .extend({ 
+                top: imageLowestOf2Size.height - imageSize.height,
+                bottom: 0, 
+                left: 0, 
+                right: imageLowestOf2Size.width - imageSize.width, 
+                background: { 
+                    r: 0, 
+                    g: 0, 
+                    b: 0, 
+                    alpha: 0 
+                }
+            })
             .raw()
             .toBuffer({ resolveWithObject: true });
         const bitmap = {
@@ -301,65 +327,54 @@ class ImageToRTFile {
             height: info.height,
         };
 
-        this.bitmap = bitmap;
+        console.log(info);
+        return bitmap;
     }
 
     async write(path) {
-        await this.wwkwkwkk();
-        return new Promise(async (resolve, reject) => {
-            const rtFileHeader = new RTFileHeader();
-            rtFileHeader.fileTypeId = C_RTFILE_TEXTURE_HEADER;
-            rtFileHeader.version = C_RTFILE_PACKAGE_LATEST_VERSION;
-            rtFileHeader.reversed = 0;
+        const imageSize = await this.getImageSize();
+        const imageLowestOf2Size = await this.getImageLowestOf2Size();
+        const rawData = await this.rawData();
 
-            const getLowestPowerOf2 = (n) => {
-                let lowest = 1;
-                while (lowest < n) {
-                    lowest <<= 1;
-                }
-                
-                return lowest;
-            }
+        const rtFileHeader = new RTFileHeader();
+        rtFileHeader.fileTypeId = C_RTFILE_TEXTURE_HEADER;
+        rtFileHeader.version = C_RTFILE_PACKAGE_LATEST_VERSION;
+        rtFileHeader.reversed = 0;
 
-            const rttexHeader = new RTTEXHeader();
-            rttexHeader.rtFileHeader = rtFileHeader;
-            rttexHeader.height = getLowestPowerOf2(this.bitmap.height);
-            rttexHeader.width = getLowestPowerOf2(this.bitmap.width);
-            rttexHeader.format = 5121;
-            rttexHeader.originalHeight = this.bitmap.height;
-            rttexHeader.originalWidth = this.bitmap.width;
-            rttexHeader.usesAlpha = 1;
-            rttexHeader.aleardyCompressed = 0;
-            rttexHeader.reversedFlags = 0;
-            rttexHeader.mipmapCount = 1;
-            rttexHeader.reversed = 1;
+        const rttexHeader = new RTTEXHeader();
+        rttexHeader.rtFileHeader = rtFileHeader;
+        rttexHeader.height = imageLowestOf2Size.height;
+        rttexHeader.width = imageLowestOf2Size.width;
+        rttexHeader.format = 5121;
+        rttexHeader.originalHeight = imageSize.height;
+        rttexHeader.originalWidth = imageSize.width;
+        rttexHeader.usesAlpha = 1;
+        rttexHeader.aleardyCompressed = 0;
+        rttexHeader.reversedFlags = 0;
+        rttexHeader.mipmapCount = 1;
+        rttexHeader.reversed = 1;
 
-            const rttexMipHeader = new RTTEXMipHeader();
-            rttexMipHeader.height = getLowestPowerOf2(this.bitmap.height);
-            rttexMipHeader.width = getLowestPowerOf2(this.bitmap.width);
-            rttexMipHeader.dataSize = this.bitmap.data.length;
-            rttexMipHeader.mipLevel = 0;
-            rttexMipHeader.reversed = 0;
+        const rttexMipHeader = new RTTEXMipHeader();
+        rttexMipHeader.height = imageLowestOf2Size.height;
+        rttexMipHeader.width = imageLowestOf2Size.width;
+        rttexMipHeader.dataSize = rawData.data.length;
+        rttexMipHeader.mipLevel = 0;
+        rttexMipHeader.reversed = 0;
 
-            const rtFileHeader_ = new RTFileHeader();
-            rtFileHeader_.fileTypeId = C_RTFILE_PACKAGE_HEADER;
-            rtFileHeader_.version = C_RTFILE_PACKAGE_LATEST_VERSION;
-            rtFileHeader_.reversed = 0;
+        const header = Buffer.concat([ rttexHeader.serialize(), rttexMipHeader.serialize() ]);
+        const data = Buffer.concat([ header, rawData.data ]);
+        const deflated = await zlib.deflateSync(data);
 
-            const concat1 = Buffer.concat([rttexHeader.serialize(), rttexMipHeader.serialize()]);
-            const concat2 = Buffer.concat([concat1, this.bitmap.data]);
-            const deflated = await zlib.deflateSync(concat2);
+        rtFileHeader.fileTypeId = C_RTFILE_PACKAGE_HEADER;
 
-            const rtPackHeader = new RTPackHeader();
-            rtPackHeader.rtFileHeader = rtFileHeader_;
-            rtPackHeader.compressedSize = deflated.length;
-            rtPackHeader.decompressedSize = concat2.length;
-            rtPackHeader.compressionType = eCompressionType_C_COMPRESSION_ZLIB;
+        const rtPackHeader = new RTPackHeader();
+        rtPackHeader.rtFileHeader = rtFileHeader;
+        rtPackHeader.compressedSize = deflated.length;
+        rtPackHeader.decompressedSize = data.length;
+        rtPackHeader.compressionType = eCompressionType_C_COMPRESSION_ZLIB;
 
-            fs.writeFileSync(path, Buffer.concat([rtPackHeader.serialize(), deflated]));
-
-            resolve(true);
-        });
+        fs.writeFileSync(path, Buffer.concat([ rtPackHeader.serialize(), deflated ]));
+        return true;
     }
 }
 
