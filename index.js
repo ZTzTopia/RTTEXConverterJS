@@ -75,9 +75,8 @@ class RTPackHeader {
         let pos = buffer.writeInt32LE(this.compressedSize);
         pos = buffer.writeInt32LE(this.decompressedSize, pos);
         pos = buffer.writeInt8(this.compressionType, pos);
-        pos = buffer.write("ztz_".repeat(4), pos);
-        buffer.write("z".repeat(3), pos);
-
+        pos = buffer.write("ztz", pos);
+        buffer.write("\0".repeat(13), pos);
         return Buffer.concat([this.rtFileHeader.serialize(), buffer]);
     }
 }
@@ -147,7 +146,8 @@ class RTTEXHeader {
         pos = buffer.writeInt8(this.aleardyCompressed, pos);
         pos = buffer.writeInt16LE(this.reversedFlags, pos);
         pos = buffer.writeInt32LE(this.mipmapCount, pos);
-        buffer.write("ztz_".repeat(16), pos);
+        pos = buffer.write("ztz", pos);
+        buffer.write("\0".repeat(61), pos);
 
         return Buffer.concat([this.rtFileHeader.serialize(), buffer]);
     }
@@ -186,7 +186,8 @@ class RTTEXMipHeader {
         pos = buffer.writeInt32LE(this.width, pos);
         pos = buffer.writeInt32LE(this.dataSize, pos);
         pos = buffer.writeInt32LE(this.mipLevel, pos);
-        buffer.write("ztz_".repeat(2), pos);
+        pos = buffer.write("ztz", pos);
+        buffer.write("\0".repeat(5), pos);
         return buffer;
     }
 }
@@ -200,6 +201,7 @@ class RTFileToImage {
 
         if (this.buffer.subarray(pos, C_RTFILE_PACKAGE_HEADER_BYTE_SIZE).toString() == C_RTFILE_PACKAGE_HEADER) {
             const tempPos = this.rtpackHeader.deserialize(this.buffer, pos);
+
             if (this.rtpackHeader.compressionType == eCompressionType_C_COMPRESSION_NONE) {
                 this.buffer = this.buffer.subarray(tempPos, this.buffer.length);
             } else if (this.rtpackHeader.compressionType == eCompressionType_C_COMPRESSION_ZLIB) {
@@ -213,48 +215,55 @@ class RTFileToImage {
     }
 
     async rawData() {
-        return new Promise(resolve => {
-            if (this.rttexHeader.format != 5121) {
-                resolve(null);
+        if (this.rttexHeader.format != 5121 && this.rttexHeader.format != RT_FORMAT_EMBEDDED_FILE) {
+            console.log("this.rttexHeader.format != 5121 && this.rttexHeader.format != RT_FORMAT_EMBEDDED_FILE");
+            return null;
+        }
+
+        if (this.rttexHeader.rtFileHeader.version > C_RTFILE_PACKAGE_LATEST_VERSION) {
+            console.log("this.rttexHeader.rtFileHeader.version > 0");
+            return null;
+        }
+
+        let posBefore = this.pos;
+        for (let i = 0; i < this.rttexHeader.mipmapCount; i++) {
+            let mipHeader = new RTTEXMipHeader();
+            this.pos = mipHeader.deserialize(this.buffer, this.pos);
+            let mipData = this.buffer.subarray(this.pos, this.pos + mipHeader.dataSize);
+
+            this.pos = posBefore;
+
+            if (mipData == null) {
+                console.log("mipData == null");
+                return null;
             }
 
-            if (this.rttexHeader.rtFileHeader.version > C_RTFILE_PACKAGE_LATEST_VERSION) {
-                resolve(null);
-            }
-
-            let posBefore = this.pos;
-            for (let i = 0; i < this.rttexHeader.mipmapCount; i++) {
-                let mipHeader = new RTTEXMipHeader();
-                this.pos = mipHeader.deserialize(this.buffer, this.pos);
-                let mipData = this.buffer.subarray(this.pos, this.pos + mipHeader.dataSize);
-
-                this.pos = posBefore;
-                
-                resolve(mipData);
-            }
-        });
+            return mipData;
+        }
     }
 
     async write(path, flipVertical = true) {
         return new Promise(async (resolve) => {
             let rawData = await this.rawData();
             if (rawData == null) {
-                console.error("RTFile raw data is null!");
+                resolve(false);
             }
 
             sharp(rawData, {
                 raw: {
                     width: this.rttexHeader.width,
                     height: this.rttexHeader.height,
-                    channels: 4,
+                    channels: this.rttexHeader.usesAlpha ? 4 : 3,
                 },
             })
             .flip(flipVertical)
             .toFile(path, (err, info) => {
                 if (err) {
+                    console.log(err);
                     resolve(false);
                 }
 
+                console.log(info);
                 resolve(true);
             });
         });
