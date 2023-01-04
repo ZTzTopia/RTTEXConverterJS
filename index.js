@@ -4,7 +4,7 @@ const path = require("node:path");
 const zlib = require("node:zlib");
 const sharp = require("sharp");
 
-const C_RTFILE_PACKAGE_LATEST_VERSION = 1;
+const C_RTFILE_PACKAGE_LATEST_VERSION = 0;
 const C_RTFILE_PACKAGE_HEADER = "RTPACK";
 const C_RTFILE_PACKAGE_HEADER_BYTE_SIZE = 6;
 
@@ -75,7 +75,8 @@ class RTPackHeader {
         let pos = buffer.writeInt32LE(this.compressedSize);
         pos = buffer.writeInt32LE(this.decompressedSize, pos);
         pos = buffer.writeInt8(this.compressionType, pos);
-        buffer.write("z".repeat(15), pos);
+        pos = buffer.write("ztz_".repeat(4), pos);
+        buffer.write("z".repeat(3), pos);
 
         return Buffer.concat([this.rtFileHeader.serialize(), buffer]);
     }
@@ -185,8 +186,7 @@ class RTTEXMipHeader {
         pos = buffer.writeInt32LE(this.width, pos);
         pos = buffer.writeInt32LE(this.dataSize, pos);
         pos = buffer.writeInt32LE(this.mipLevel, pos);
-        pos = buffer.writeInt32LE(this.reversed, pos);
-        buffer.writeInt32LE(this.reversed, pos);
+        buffer.write("ztz_".repeat(2), pos);
         return buffer;
     }
 }
@@ -216,7 +216,7 @@ class RTFileToImage {
                 resolve(null);
             }
 
-            if (this.rttexHeader.rtFileHeader.version >= C_RTFILE_PACKAGE_LATEST_VERSION) {
+            if (this.rttexHeader.rtFileHeader.version > C_RTFILE_PACKAGE_LATEST_VERSION) {
                 resolve(null);
             }
 
@@ -260,9 +260,6 @@ class RTFileToImage {
 }
 
 class ImageToRTFile {
-    bitmap;
-    path;
-
     constructor(path) {
         this.bitmap = {};
         this.path = path;
