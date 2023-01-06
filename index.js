@@ -373,12 +373,26 @@ class ImageToRTFile {
         rtPackHeader.decompressedSize = data.length;
         rtPackHeader.compressionType = eCompressionType_C_COMPRESSION_ZLIB;
 
-        fs.writeFileSync(path, Buffer.concat([ rtPackHeader.serialize(), deflated ]));
+        let theData = Buffer.concat([ rtPackHeader.serialize(), deflated ]);
+        fs.writeFileSync(path, theData);
+
+        const hashString = (buffer) => {
+            let hash = 0x55555555;
+            if (buffer) {
+                for (let i = 0; i < buffer.length; i++) {
+                    hash = (hash >>> 27) + (hash << 5) + buffer[i];
+                }
+            }
+        
+            return hash;
+        };
+
+        console.log(`Hash: ${hashString(theData)}`);
         return true;
     }
 }
 
-async function main() {
+(async () => {
     const rl = readline.createInterface({
         input: process.stdin,
         output: process.stdout
@@ -400,11 +414,12 @@ async function main() {
                 if (!ret) {
                     console.log("Failed to convert image to RTTEX.");
                 }
+            } else {
+                console.log("Option not valid.");
+                return;
             }
         
             console.log("Done."); 
         });
     });
-}
-
-main();
+})();
